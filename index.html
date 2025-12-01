@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>QuickHire (Firebase Integrated)</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 1.5rem; background: #f9fafb; color: #333; }
+    h1,h2 { text-align: center; }
+    .skills-list, .profile, .employer, .auth, .jobs { max-width: 800px; margin: 1rem auto; background: white; border-radius: 10px; padding: 1.25rem; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+    .skill { display:inline-block; margin:0.3rem; padding:0.5rem 0.9rem; border:1px solid #ccc; border-radius:20px; cursor:pointer; transition:all .15s ease; }
+    .skill.selected { background:#007bff; color:white; border-color:#007bff; }
+    .selected-skills { display:flex; flex-wrap:wrap; gap:0.5rem; }
+    .selected-skill { background:#e5f1ff; padding:0.45rem 0.85rem; border-radius:15px; display:flex; align-items:center; gap:0.5rem; }
+    .remove-btn { background:transparent; border:none; cursor:pointer; color:#d00; font-size:1.05rem; }
+    .remove-btn:hover { color:#a00; }
+    .search-bar { display:block; margin:0 auto 1rem; max-width:400px; padding:0.6rem 1rem; font-size:1rem; border:1px solid #ccc; border-radius:25px; width:100%; box-sizing:border-box; }
+    .mode-toggle { display:flex; justify-content:center; gap:1rem; margin-bottom:1rem; flex-wrap:wrap; }
+    button { background-color:#007bff; color:white; border:none; padding:0.55rem 1rem; border-radius:8px; cursor:pointer; }
+    button:hover { background-color:#0056b3; }
+    textarea, input[type="text"], input[type="email"], input[type="password"] { width:100%; padding:0.5rem; border-radius:8px; border:1px solid #ccc; margin-top:0.5rem; box-sizing:border-box; }
+    textarea { height:80px; resize:none; font-family:Arial, sans-serif; }
+    .hidden { display:none; }
+    .row { display:flex; gap:1rem; }
+    .small { font-size:0.9rem; color:#555; }
+    .job { border:1px solid #eee; padding:0.75rem; border-radius:8px; margin-bottom:0.6rem; }
+    .job.overdue { border-color:#ffb4b4; background:#fff6f6; }
+    .job .meta { font-size:0.9rem; color:#666; }
+    .divider { height:1px; background:#eee; margin:1rem 0; }
+    .auth { max-width:420px; }
+  </style>
+</head>
+<body>
+
+  <h1>QuickHire</h1>
+
+  <div class="mode-toggle">
+    <button id="toggleModeBtn">Switch to Employer Mode</button>
+    <div id="authButtons">
+      <button id="showAuthBtn">Login / Signup</button>
+    </div>
+    <div id="userControls" style="display:none;">
+      <span id="userEmail" class="small"></span>
+      <button id="logoutBtn">Logout</button>
+    </div>
+  </div>
+
+  <!-- AUTH BOX -->
+  <div id="authBox" class="auth hidden">
+    <h2>Login / Signup</h2>
+    <label>Email</label>
+    <input type="email" id="emailInput" placeholder="email@example.com" />
+    <label>Password</label>
+    <input type="password" id="passwordInput" placeholder="password" />
+    <div style="margin-top:0.75rem; display:flex; gap:0.5rem;">
+      <button id="signupBtn">Create Account</button>
+      <button id="loginBtn">Login</button>
+      <button id="closeAuthBtn">Close</button>
+    </div>
+
+    <div style="margin-top:0.75rem;">
+      <label><input type="checkbox" id="isEmployerCheckbox"> Sign up as Employer</label>
+    </div>
+
+    <p id="authStatus" class="small"></p>
+  </div>
+
+  <!-- Job Seeker Mode -->
+  <div id="userMode">
+    <h2>Add skills to your profile for employers to see</h2>
+
+    <div class="skills-list">
+      <h3>Select Your Skills</h3>
+      <input type="text" id="searchInput" class="search-bar" placeholder="Search for a skill..." />
+      <div id="skillsContainer"></div>
+    </div>
+
+    <div class="profile">
+      <h3>Your Profile</h3>
+      <div id="selectedSkills" class="selected-skills"></div>
+
+      <div style="margin-top:1rem;">
+        <label>Upload Resume (PDF/doc):</label>
+        <input type="file" id="resumeUpload" accept=".pdf,.doc,.docx,.txt" />
+        <div style="margin-top:0.5rem;">
+          <button id="uploadResumeBtn">Upload Resume</button>
+          <span id="resumeStatus" class="small"></span>
+        </div>
+        <div id="resumeLink" class="small" style="margin-top:0.5rem;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Employer Mode -->
+  <div id="employerMode" class="hidden">
+    <h2>Create a Job Listing</h2>
+    <div class="employer">
+      <label>Job Name:</label>
+      <input type="text" id="jobName" placeholder="Enter job title" />
+      <label>Job Description:</label>
+      <textarea id="jobDesc" placeholder="Enter job description"></textarea>
+
+      <h3>Add Required Skills</h3>
+      <input type="text" id="employerSearchInput" class="search-bar" placeholder="Search for a skill..." />
+      <div id="employerSkillsContainer"></div>
+
+      <h3>Selected Job Skills:</h3>
+      <div id="selectedJobSkills" class="selected-skills"></div>
+
+      <div style="margin-top:0.8rem;">
+        <button id="saveJobBtn">Save Job Listing</button>
+        <span id="saveJobStatus" class="small"></span>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="jobs">
+      <h3>My Job Listings</h3>
+      <div id="jobList"></div>
+    </div>
+  </div>
+
+  <script type="module">
+    // --------- Firebase setup (modular SDK) ----------
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+    import {
+      getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut,
+      onAuthStateChanged
+    } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+    import {
+      getFirestore, doc, setDoc, getDoc, updateDoc, collection, addDoc, query, where, getDocs, orderBy, serverTimestamp
+    } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+    import {
+      getStorage, ref, uploadBytes, getDownloadURL
+    } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
+
+    // YOUR firebaseConfig (replace with whatever your Firebase console shows).
+    // Using the config you gave earlier:
+    const firebaseConfig = {
+      apiKey: "AIzaSyAm5fmlN6cyKLwViqqsnXSC4CeFt-B_Kio",
+      authDomain: "quickhire-291db.firebaseapp.com",
+      projectId: "quickhire-291db",
+      storageBucket: "quickhire-291db.firebasestorage.app",
+      messagingSenderId: "1059684660402",
+      appId: "1:1059684660402:web:55c4c0f0adabf302ee85ab"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    const storage = getStorage(app);
+
+    // ---------- UI elements ----------
+    const skills = [
+      "HTML","CSS","JavaScript","Python","Networking","Excel","Agile","Data analysis","Project Management","SQL",
+      "React","Node.js","UI Design","Cybersecurity","Machine learning","Cloud Computing","Docker","Github","Linux",
+      "C++","Java","Teamwork","Communication","Leadership","Problem Solving","Critical thinking","AWS","Azure",
+      "Testing","Time management"
+    ];
+
+    const skillsContainer = document.getElementById("skillsContainer");
+    const selectedSkillsContainer = document.getElementById("selectedSkills");
+    const searchInput = document.getElementById("searchInput");
+    const toggleModeBtn = document.getElementById("toggleModeBtn");
+    const userMode = document.getElementById("userMode");
+    const employerMode = document.getElementById("employerMode");
+
+    // Employer mode elements
+    const employerSkillsContainer = document.getElementById("employerSkillsContainer");
+    const employerSearchInput = document.getElementById("employerSearchInput");
+    const selectedJobSkillsContainer = document.getElementById("selectedJobSkills");
+    const saveJobBtn = document.getElementById("saveJobBtn");
+    const saveJobStatus = document.getElementById("saveJobStatus");
+    const jobNameInput = document.getElementById("jobName");
+    const jobDescInput = document.getElementById("jobDesc");
+    const jobList = document.getElementById("jobList");
+
+    // Auth elements
+    const authBox = document.getElementById("authBox");
+    const showAuthBtn = document.getElementById("showAuthBtn");
+    const closeAuthBtn = document.getElementById("closeAuthBtn");
+    const signupBtn = document.getElementById("signupBtn");
+    const loginBtn = document.getElementById("loginBtn");
+    const logoutBtn = document.getElementById("logoutBtn");
+    const emailInput = document.getElementById("emailInput");
+    const passwordInput = document.getElementById("passwordInput");
+    const authStatus = document.getElementById("authStatus");
+    const userControls = document.getElementById("userControls");
+    const userEmail = document.getElementById("userEmail");
+    const isEmployerCheckbox = document.getElementById("isEmployerCheckbox");
+
+    // Resume upload elements
+    const resumeUpload = document.getElementById("resumeUpload");
+    const uploadResumeBtn = document.getElementById("uploadResumeBtn");
+    const resumeStatus = document.getElementById("resumeStatus");
+    const resumeLink = document.getElementById("resumeLink");
+
+    // State
+    let selectedSkills = [];               // for current user (local before sign-in or replaced by Firestore)
+    let selectedJobSkills = [];            // for job creation
+    let currentUser = null;                // Firebase user
+    let userProfile = null;                // loaded profile doc (if exists)
+    let currentModeIsEmployer = false;
+
+    // ---------- Helper: business days ----------
+    function addBusinessDays(startDate, days) {
+      const date = new Date(startDate.getTime());
+      let added = 0;
+      while (added < days) {
+        date.setDate(date.getDate() + 1);
+        const day = date.getDay();
+        if (day !== 0 && day !== 6) { // skip Sun(0) and Sat(6)
+          added++;
+        }
+      }
+      return date;
+    }
+
+    function daysBetween(d1, d2) {
+      const ms = d2.getTime() - d1.getTime();
+      return Math.ceil(ms / (1000*60*60*24));
+    }
+
+    // ---------- Render skills function ----------
+    function renderSkills(container, selectedList, toggleFunction, filter = "") {
+      container.innerHTML = "";
+      const filtered = skills.filter(skill => skill.toLowerCase().includes(filter.toLowerCase()));
+      if (filtered.length === 0) {
+        const msg = document.createElement("p");
+        msg.textContent = "No matching skills found.";
+        msg.style.textAlign = "center";
+        msg.style.color = "#777";
+        container.appendChild(msg);
+        return;
+      }
+      filtered.forEach(skill => {
+        const skillEl = document.createElement("div");
+        skillEl.textContent = skill;
+        skillEl.className = "skill";
+        if (selectedList.includes(skill)) skillEl.classList.add("selected");
+        skillEl.addEventListener("click", () => toggleFunction(skill));
+        container.appendChild(skillEl);
+      });
+    }
+
+    // ---------- Job Seeker Mode functions ----------
+    async function toggleSkill(skill) {
+      if (selectedSkills.includes(skill)) {
+        selectedSkills = selectedSkills.filter(s => s !== skill);
+      } else {
+        selectedSkills.push(skill);
+      }
+      renderSelectedSkillsUI();
+      // persist if signed in
+      if (currentUser) {
+        await saveProfileToFirestore();
+      } else {
+        localStorage.setItem("selectedSkills", JSON.stringify(selectedSkills));
+      }
+      renderSkills(skillsContainer, selectedSkills, toggleSkill, searchInput.value);
+    }
+
+    function renderSelectedSkillsUI() {
+      selectedSkillsContainer.innerHTML = "";
+      selectedSkills.forEach(skill => {
+        const div = document.createElement("div");
+        div.className = "selected-skill";
+        div.innerHTML = `${skill} <button class="remove-btn" data-skill="${skill}">&times;</button>`;
+        selectedSkillsContainer.appendChild(div);
+      });
+      // attach remove handlers
+      selectedSkillsContainer.querySelectorAll(".remove-btn").forEach(btn => {
+        btn.addEventListener("click", (e) => {
+          const s = e.currentTarget.dataset.skill;
+          selectedSkills = selectedSkills.filter(x => x !== s);
+          if (currentUser) saveProfileToFirestore();
+          else localStorage.setItem("selectedSkills", JSON.stringify(selectedSkills));
+          renderSelectedSkillsUI();
+          renderSkills(skillsContainer, selectedSkills, toggleSkill, searchInput.value);
+        });
+      });
+    }
+
+    // ---------- Employer Mode functions ----------
+    function toggleJobSkill(skill) {
+      if (selectedJobSkills.includes(skill)) {
+        selectedJobSkills = selectedJobSkills.filter(s => s !== skill);
+      } else {
+        selectedJobSkills.push(skill);
+      }
+      updateEmployerUI();
+    }
+
+    function updateEmployerUI() {
+      renderSkills(employerSkillsContainer, selectedJobSkills, toggleJobSkill, employerSearchInput.value);
+      selectedJobSkillsContainer.innerHTML = "";
+      selectedJobSkills.forEach(skill => {
+        const div = document.createElement("div");
+        div.className = "selected-skill";
+        div.innerHTML = `${skill} <button class="remove-btn" data-skill="${skill}">&times;</button>`;
+        selectedJobSkillsContainer.appendChild(div);
+      });
+      selectedJobSkillsContainer.querySelectorAll(".remove-btn").forEach(btn => {
+        btn.addEventListener("click", (e) => {
+          const s = e.currentTarget.dataset.skill;
+          selectedJobSkills = selectedJobSkills.filter(x => x !== s);
+          updateEmployerUI();
+        });
+      });
+    }
+
+    // Save job to Firestore (employer only)
+    async function saveJobListing() {
+      if (!currentUser) {
+        saveJobStatus.textContent = "You must be logged in as an employer to create jobs.";
+        return;
+      }
+      // Basic check: userProfile must have isEmployer true
+      if (!(userProfile && userProfile.isEmployer)) {
+        saveJobStatus.textContent = "Your account is not marked as an employer.";
+        return;
+      }
+      const name = jobNameInput.value.trim();
+      const desc = jobDescInput.value.trim();
+      if (!name || !desc) {
+        saveJobStatus.textContent = "Please add job name and description.";
+        return;
+      }
+      saveJobStatus.textContent = "Saving...";
+      try {
+        const createdAt = new Date();
+        const responseDeadline = addBusinessDays(createdAt, 10); // 10 business days
+        const docRef = await addDoc(collection(db, "jobs"), {
+          ownerUid: currentUser.uid,
+          ownerEmail: currentUser.email,
+          name,
+          desc,
+          skills: selectedJobSkills,
+          createdAt: serverTimestamp(),
+          responseDeadline: responseDeadline.toISOString(),
+          responded: false,
+          respondedAt: null
+        });
+        saveJobStatus.textContent = "Saved job!";
+        jobNameInput.value = "";
+        jobDescInput.value = "";
+        selectedJobSkills = [];
+        updateEmployerUI();
+        await loadEmployerJobs(); // refresh list
+      } catch (err) {
+        console.error(err);
+        saveJobStatus.textContent = "Error saving job: " + err.message;
+      }
+    }
+
+    // Load jobs for current employer
+    async function loadEmployerJobs() {
+      jobList.innerHTML = "Loading...";
+      if (!currentUser) { jobList.innerHTML = "Sign in to see jobs."; return; }
+      const q = query(collection(db, "jobs"), where("ownerUid", "==", currentUser.uid), orderBy("createdAt", "desc"));
+      try {
+        const snap = await getDocs(q);
+        jobList.innerHTML = "";
+        if (snap.empty) { jobList.innerHTML = "<p class='small'>No job listings yet.</p>"; return; }
+        snap.forEach(docSnap => {
+          const data = docSnap.data();
+          const docId = docSnap.id;
+          const created = data.createdAt && data.createdAt.toDate ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt) : null);
+          const deadline = data.responseDeadline ? new Date(data.responseDeadline) : null;
+          const now = new Date();
+          const overdue = deadline && now > deadline && !data.responded;
+          const daysLeft = deadline ? daysBetween(now, deadline) : null;
+
+          const wrapper = document.createElement("div");
+          wrapper.className = "job" + (overdue ? " overdue" : "");
+          wrapper.innerHTML = `
+            <strong>${data.name}</strong>
+            <div class="meta">${data.desc}</div>
+            <div class="meta">Skills: ${(data.skills || []).join(", ")}</div>
+            <div class="meta">Posted: ${created ? created.toLocaleString() : "—"} | Deadline: ${deadline ? deadline.toLocaleDateString() : "—" } ${daysLeft !== null ? `| ${daysLeft} day(s) left` : ""}</div>
+            <div style="margin-top:0.5rem;">
+              <button data-docid="${docId}" class="markRespondedBtn">${data.responded ? "Mark as Not Responded" : "Mark as Responded"}</button>
+              <span style="margin-left:0.6rem;" class="small">${data.responded ? "Responded At: " + (data.respondedAt && data.respondedAt.toDate ? data.respondedAt.toDate().toLocaleString() : data.respondedAt) : ""}</span>
+            </div>
+          `;
+          jobList.appendChild(wrapper);
+        });
+        // attach handlers
+        jobList.querySelectorAll(".markRespondedBtn").forEach(btn => {
+          btn.addEventListener("click", async (e) => {
+            const id = e.currentTarget.dataset.docid;
+            await toggleResponded(id);
+            await loadEmployerJobs();
+          });
+        });
+      } catch (err) {
+        console.error(err);
+        jobList.innerHTML = "<p class='small'>Error loading jobs: " + err.message + "</p>";
+      }
+    }
+
+    // Toggle responded state
+    async function toggleResponded(jobDocId) {
+      try {
+        const docRef = doc(db, "jobs", jobDocId);
+        const snap = await getDoc(docRef);
+        if (!snap.exists()) return;
+        const data = snap.data();
+        const newState = !data.responded;
+        await updateDoc(docRef, {
+          responded: newState,
+          respondedAt: newState ? serverTimestamp() : null
+        });
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    // ---------- Auth: signup / login / logout ----------
+    showAuthBtn.addEventListener("click", () => {
+      authBox.classList.remove("hidden");
+    });
+    closeAuthBtn.addEventListener("click", () => authBox.classList.add("hidden"));
+
+    signupBtn.addEventListener("click", async () => {
+      const email = emailInput.value.trim();
+      const pw = passwordInput.value;
+      const isEmployer = isEmployerCheckbox.checked;
+      authStatus.textContent = "";
+      if (!email || !pw) { authStatus.textContent = "Provide email and password."; return; }
+      try {
+        const cred = await createUserWithEmailAndPassword(auth, email, pw);
+        // create user profile in Firestore
+        const uid = cred.user.uid;
+        await setDoc(doc(db, "users", uid), {
+          email: email,
+          createdAt: serverTimestamp(),
+          isEmployer: isEmployer,
+          skills: [],
+          resumeURL: null
+        });
+        authStatus.textContent = "Account created and profile saved.";
+        authBox.classList.add("hidden");
+      } catch (err) {
+        authStatus.textContent = err.message;
+      }
+    });
+
+    loginBtn.addEventListener("click", async () => {
+      const email = emailInput.value.trim();
+      const pw = passwordInput.value;
+      authStatus.textContent = "";
+      if (!email || !pw) { authStatus.textContent = "Provide email and password."; return; }
+      try {
+        await signInWithEmailAndPassword(auth, email, pw);
+        authStatus.textContent = "Logged in.";
+        authBox.classList.add("hidden");
+      } catch (err) {
+        authStatus.textContent = err.message;
+      }
+    });
+
+    logoutBtn.addEventListener("click", async () => {
+      await signOut(auth);
+    });
+
+    // When auth state changes
+    onAuthStateChanged(auth, async (user) => {
+      currentUser = user;
+      if (user) {
+        userControls.style.display = "inline-flex";
+        userEmail.textContent = user.email;
+        document.getElementById("authButtons").style.display = "none";
+        // load profile
+        const userDoc = await getDoc(doc(db, "users", user.uid));
+        if (userDoc.exists()) {
+          userProfile = userDoc.data();
+          // apply profile skills if present
+          selectedSkills = userProfile.skills || [];
+          if (userProfile.resumeURL) {
+            resumeLink.innerHTML = `<a href="${userProfile.resumeURL}" target="_blank">View uploaded resume</a>`;
+          } else resumeLink.innerHTML = "";
+        } else {
+          // create minimal profile
+          await setDoc(doc(db, "users", user.uid), {
+            email: user.email,
+            createdAt: serverTimestamp(),
+            isEmployer: false,
+            skills: [],
+            resumeURL: null
+          });
+          userProfile = { isEmployer: false, skills: [], resumeURL: null };
+        }
+        renderSkills(skillsContainer, selectedSkills, toggleSkill, searchInput.value);
+        renderSelectedSkillsUI();
+        // If logged-in user is employer, show employer mode when toggled
+        if (userProfile.isEmployer && currentModeIsEmployer) {
+          loadEmployerJobs();
+        }
+      } else {
+        // signed out
+        userControls.style.display = "none";
+        document.getElementById("authButtons").style.display = "inline-block";
+        userProfile = null;
+        currentUser = null;
+        // load from localStorage instead
+        selectedSkills = JSON.parse(localStorage.getItem("selectedSkills")) || [];
+        renderSkills(skillsContainer, selectedSkills, toggleSkill, searchInput.value);
+        renderSelectedSkillsUI();
+      }
+    });
+
+    // ---------- Resume upload ----------
+    uploadResumeBtn.addEventListener("click", async () => {
+      if (!currentUser) {
+        resumeStatus.textContent = "Please login to upload resume.";
+        return;
+      }
+      const file = resumeUpload.files[0];
+      if (!file) {
+        resumeStatus.textContent = "Pick a file first.";
+        return;
+      }
+      resumeStatus.textContent = "Uploading...";
+      try {
+        // store under resumes/{uid}/{timestamp}_{name}
+        const path = `resumes/${currentUser.uid}/${Date.now()}_${file.name}`;
+        const fileRef = ref(storage, path);
+        await uploadBytes(fileRef, file);
+        const url = await getDownloadURL(fileRef);
+        // update user doc
+        await updateDoc(doc(db, "users", currentUser.uid), { resumeURL: url });
+        resumeStatus.textContent = "Uploaded!";
+        resumeLink.innerHTML = `<a href="${url}" target="_blank">View uploaded resume</a>`;
+      } catch (err) {
+        console.error(err);
+        resumeStatus.textContent = "Upload failed: " + err.message;
+      }
+    });
+
+    // ---------- Mode toggle ----------
+    toggleModeBtn.addEventListener("click", async () => {
+      const employerModeActive = !employerMode.classList.contains("hidden");
+      if (employerModeActive) {
+        employerMode.classList.add("hidden");
+        userMode.classList.remove("hidden");
+        toggleModeBtn.textContent = "Switch to Employer Mode";
+        currentModeIsEmployer = false;
+      } else {
+        // require employer account to access employer mode
+        if (!currentUser) {
+          alert("Please login as an employer account to access Employer Mode.");
+          return;
+        }
+        // reload profile if necessary
+        const userDoc = await getDoc(doc(db, "users", currentUser.uid));
+        userProfile = userDoc.exists() ? userDoc.data() : userProfile;
+        if (!userProfile || !userProfile.isEmployer) {
+          alert("Your account is not marked as an employer. If you are an employer, check 'Sign up as Employer' when creating your account.");
+          return;
+        }
+        employerMode.classList.remove("hidden");
+        userMode.classList.add("hidden");
+        toggleModeBtn.textContent = "Switch to User Mode";
+        currentModeIsEmployer = true;
+        // load employer's jobs
+        loadEmployerJobs();
+      }
+    });
+
+    // ---------- Save profile helper ----------
+    async function saveProfileToFirestore() {
+      if (!currentUser) return;
+      try {
+        await updateDoc(doc(db, "users", currentUser.uid), {
+          skills: selectedSkills
+        });
+      } catch (err) {
+        // if doc doesn't exist, create it
+        try {
+          await setDoc(doc(db, "users", currentUser.uid), {
+            email: currentUser.email,
+            createdAt: serverTimestamp(),
+            skills: selectedSkills,
+            isEmployer: false,
+            resumeURL: null
+          });
+        } catch (err2) {
+          console.error("saveProfile error", err2);
+        }
+      }
+    }
+
+    // ---------- Initial render & listeners ----------
+    renderSkills(skillsContainer, selectedSkills, toggleSkill);
+    renderSkills(employerSkillsContainer, selectedJobSkills, toggleJobSkill);
+    renderSelectedSkillsUI();
+    updateEmployerUI();
+
+    searchInput.addEventListener("input", (e) => renderSkills(skillsContainer, selectedSkills, toggleSkill, e.target.value));
+    employerSearchInput.addEventListener("input", (e) => renderSkills(employerSkillsContainer, selectedJobSkills, toggleJobSkill, e.target.value));
+    saveJobBtn.addEventListener("click", saveJobListing);
+
+    // load any persisted local selectedSkills for non-logged-in users
+    selectedSkills = JSON.parse(localStorage.getItem("selectedSkills")) || [];
+    renderSelectedSkillsUI();
+    renderSkills(skillsContainer, selectedSkills, toggleSkill);
+
+  </script>
+</body>
+</html>
