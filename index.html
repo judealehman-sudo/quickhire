@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>QuickHire</title>
+
+<style>
+
+body{
+font-family:Arial,Helvetica,sans-serif;
+margin:0;
+background:linear-gradient(135deg,#e8f3ff,#ffffff);
+color:#333
+}
+
+header{
+background:#0b63ce;
+color:white;
+padding:18px 40px;
+display:flex;
+justify-content:space-between;
+align-items:center
+}
+
+header h1{margin:0}
+
+nav button{
+margin-left:10px;
+background:white;
+color:#0b63ce;
+border:none;
+padding:7px 14px;
+border-radius:6px;
+cursor:pointer
+}
+
+.hero{
+text-align:center;
+padding:60px 20px
+}
+
+.container{
+max-width:1200px;
+margin:auto;
+padding:20px
+}
+
+.jobs-grid{
+display:grid;
+grid-template-columns:repeat(auto-fit,minmax(300px,1fr));
+gap:20px
+}
+
+.job-card{
+background:white;
+padding:20px;
+border-radius:10px;
+box-shadow:0 4px 12px rgba(0,0,0,0.08)
+}
+
+.job-title{font-size:19px;font-weight:bold}
+.company{font-size:14px;color:#666;margin-bottom:5px}
+
+.skills{margin-top:8px;font-size:14px}
+
+.apply-btn{
+margin-top:10px;
+background:#0b63ce;
+color:white;
+border:none;
+padding:8px 14px;
+border-radius:6px;
+cursor:pointer
+}
+
+.panel{
+max-width:800px;
+margin:30px auto;
+background:white;
+padding:25px;
+border-radius:10px;
+box-shadow:0 3px 10px rgba(0,0,0,0.1)
+}
+
+.skill{
+display:inline-block;
+padding:6px 10px;
+border:1px solid #ccc;
+border-radius:20px;
+margin:4px;
+cursor:pointer
+}
+
+.skill.selected{
+background:#0b63ce;
+color:white
+}
+
+.notification{
+background:#fff3cd;
+padding:8px;
+border-radius:6px;
+margin-bottom:8px
+}
+
+.message{
+background:#f0f7ff;
+padding:8px;
+border-radius:6px;
+margin-top:5px
+}
+
+.hidden{display:none}
+
+</style>
+</head>
+
+<body>
+
+<header>
+<h1>QuickHire</h1>
+
+<nav>
+<button id="signupBtn">Sign Up</button>
+<button id="loginBtn">Log In</button>
+<button id="logoutBtn" class="hidden">Log Out</button>
+</nav>
+</header>
+
+<section class="hero">
+<h2>Find Jobs Fast</h2>
+<p>Employers must respond within 10 days.</p>
+</section>
+
+<div class="container">
+
+<input id="jobSearch" placeholder="Search jobs" style="width:100%;padding:10px;border-radius:8px;border:1px solid #ccc;margin-bottom:20px">
+
+<div id="jobs" class="jobs-grid"></div>
+
+</div>
+
+<div id="userPanel" class="panel hidden">
+
+<h3>Your Skills</h3>
+<div id="skills"></div>
+
+<h3>Upload Resume</h3>
+<input type="file" id="resumeUpload">
+<p id="resumeStatus"></p>
+
+<h3>Notifications</h3>
+<div id="notifications"></div>
+
+<h3>Messages</h3>
+<div id="messages"></div>
+
+</div>
+
+<div id="employerPanel" class="panel hidden">
+
+<h3>Company Profile</h3>
+<input id="companyName" placeholder="Company name"><br><br>
+<textarea id="companyDesc" placeholder="Company description"></textarea>
+
+<h3>Create Job</h3>
+<input id="jobName" placeholder="Job name"><br><br>
+<textarea id="jobDesc" placeholder="Description"></textarea>
+
+<h4>Required Skills</h4>
+<div id="jobSkills"></div>
+
+<button id="postJob">Post Job</button>
+
+<h3>Analytics</h3>
+<div id="analytics"></div>
+
+<h3>Applications</h3>
+<div id="applications"></div>
+
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
+
+<script>
+
+const firebaseConfig={
+apiKey:"AIzaSyAm5fmlN6cyKLwViqqsnXSC4CeFt-B_Kio",
+authDomain:"quickhire-291db.firebaseapp.com",
+projectId:"quickhire-291db",
+storageBucket:"quickhire-291db.appspot.com",
+messagingSenderId:"1059684660402",
+appId:"1:1059684660402:web:55c4c0f0adabf302ee85ab"
+}
+
+firebase.initializeApp(firebaseConfig)
+
+const auth=firebase.auth()
+const db=firebase.firestore()
+const storage=firebase.storage()
+
+const TEN_DAYS=10*24*60*60*1000
+
+let currentUser=null
+let selectedSkills=[]
+
+const skills=["HTML","CSS","JavaScript","Python","SQL","React","Node.js","Excel","AWS","Docker","GitHub","Linux","Communication","Leadership"]
+
+const jobsDiv=document.getElementById("jobs")
+const skillsDiv=document.getElementById("skills")
+
+skills.forEach(skill=>{
+const el=document.createElement("span")
+el.className="skill"
+el.textContent=skill
+el.onclick=()=>{
+if(selectedSkills.includes(skill)){
+selectedSkills=selectedSkills.filter(s=>s!==skill)
+}else{
+selectedSkills.push(skill)
+}
+renderSkills()
+}
+skillsDiv.appendChild(el)
+})
+
+function renderSkills(){
+[...skillsDiv.children].forEach(el=>{
+if(selectedSkills.includes(el.textContent)){
+el.classList.add("selected")
+}else{
+el.classList.remove("selected")
+}
+})
+}
+
+function matchScore(jobSkills){
+if(selectedSkills.length===0) return 0
+const match=jobSkills.filter(s=>selectedSkills.includes(s)).length
+return Math.round(match/jobSkills.length*100)
+}
+
+function renderJobs(list){
+
+const search=document.getElementById("jobSearch").value.toLowerCase()
+
+jobsDiv.innerHTML=""
+
+list=list.filter(j=>j.name.toLowerCase().includes(search)||j.desc.toLowerCase().includes(search))
+
+list.sort((a,b)=>matchScore(b.skills)-matchScore(a.skills))
+
+list.forEach(job=>{
+
+const expired=Date.now()>job.deadline
+
+const score=matchScore(job.skills)
+
+const card=document.createElement("div")
+
+card.className="job-card"
+
+card.innerHTML=`
+
+<div class="job-title">${job.name}</div>
+<div class="company">${job.company||"Company"}</div>
+<div>${job.desc}</div>
+
+<div class="skills">Skills: ${job.skills.join(", ")}</div>
+
+${currentUser?`<div style="color:#0b63ce">Match: ${score}%</div>`:""}
+
+${expired?"<div style='color:red;margin-top:8px'>Expired</div>":`<button class="apply-btn" onclick="apply('${job.id}')">Apply</button>`}
+
+`
+
+jobsDiv.appendChild(card)
+
+})
+
+}
+
+async function apply(id){
+
+if(!currentUser){
+alert("Login required")
+return
+}
+
+const existing=await db.collection("applications")
+.where("jobId","==",id)
+.where("userId","==",currentUser.uid)
+.get()
+
+if(!existing.empty){
+alert("Already applied")
+return
+}
+
+const job=await db.collection("jobs").doc(id).get()
+
+await db.collection("applications").add({
+jobId:id,
+jobName:job.data().name,
+employerId:job.data().employerId,
+userId:currentUser.uid,
+skills:selectedSkills,
+status:"pending",
+appliedAt:firebase.firestore.FieldValue.serverTimestamp()
+})
+
+await db.collection("notifications").add({
+employerId:job.data().employerId,
+message:`New application for ${job.data().name}`,
+time:Date.now()
+})
+
+}
+
+function loadJobs(){
+ db.collection("jobs").onSnapshot(snap=>{
+ const jobs=snap.docs.map(d=>({id:d.id,...d.data()}))
+ renderJobs(jobs)
+ })
+}
+
+function loadAnalytics(){
+if(!currentUser) return
+
+const div=document.getElementById("analytics")
+
+ db.collection("applications")
+ .where("employerId","==",currentUser.uid)
+ .onSnapshot(snap=>{
+
+ const total=snap.size
+
+ div.innerHTML=`Total Applications: ${total}`
+
+ })
+
+}
+
+function loadNotifications(){
+
+if(!currentUser) return
+
+const div=document.getElementById("notifications")
+
+ db.collection("notifications")
+ .where("employerId","==",currentUser.uid)
+ .onSnapshot(snap=>{
+
+ div.innerHTML=""
+
+ snap.docs.forEach(doc=>{
+ const d=document.createElement("div")
+ d.className="notification"
+ d.textContent=doc.data().message
+ div.appendChild(d)
+ })
+
+ })
+
+}
+
+loadJobs()
+
+</script>
+
+</body>
+</html>
+
