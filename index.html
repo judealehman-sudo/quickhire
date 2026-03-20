@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>QuickHire</title>
+
+<style>
+body{font-family:Arial;margin:0;background:linear-gradient(135deg,#e8f3ff,#ffffff);}header{background:#0b63ce;color:white;padding:16px 40px;display:flex;justify-content:space-between;align-items:center;}nav button{margin-left:10px;background:white;color:#0b63ce;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;}.container{max-width:1100px;margin:auto;padding:20px;}.jobs-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px;}.job-card{background:white;padding:18px;border-radius:10px;box-shadow:0 4px 12px rgba(0,0,0,0.1);border-left:6px solid #0b63ce;}.apply-btn{margin-top:10px;background:#0b63ce;color:white;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;}.panel{max-width:800px;margin:20px auto;background:white;padding:20px;border-radius:10px;box-shadow:0 4px 10px rgba(0,0,0,0.1);}.skill{display:inline-block;padding:6px 10px;border:1px solid #ccc;border-radius:20px;margin:4px;cursor:pointer;}.skill.selected{background:#0b63ce;color:white;}.hidden{display:none;}textarea,input{width:100%;padding:8px;margin-top:5px;}
+</style>
+</head>
+<body>
+
+<header>
+<h2>QuickHire</h2>
+<nav>
+<button id="signupBtn">Sign Up</button>
+<button id="loginBtn">Log In</button>
+<button id="logoutBtn" class="hidden">Log Out</button>
+</nav>
+</header>
+
+<!-- APPLICANT VIEW -->
+<div id="jobBoard" class="container">
+<input id="search" placeholder="Search jobs" style="width:100%;padding:10px;margin-bottom:20px">
+<div id="jobs" class="jobs-grid"></div>
+</div>
+
+<!-- EMPLOYER VIEW -->
+<div id="employerPanel" class="panel hidden">
+<h3>Create Job</h3>
+<label>Job Title</label>
+<input id="jobName">
+<label>Job Description</label>
+<textarea id="jobDesc"></textarea>
+<h4>Required Skills</h4>
+<div id="jobSkills"></div>
+<br>
+<button id="postJob">Post Job</button>
+<p id="jobStatus"></p>
+
+<hr>
+<h3>Your Jobs & Applications</h3>
+<div id="employerJobs"></div>
+</div>
+
+<script type="module">
+import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
+
+const SUPABASE_URL = "https://cwrschafpaerspklvoqk.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN3cnNjaGFmcGFlcnNwa2x2b3FrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM5NzM2MjIsImV4cCI6MjA4OTU0OTYyMn0.qaUuhw5YSi7aa_rT7dFrck26BnvSaAFSrrBwfclaCPw";
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+let currentUser = null;
+let selectedJobSkills = [];
+let allJobs = [];
+
+const skills=["HTML","CSS","JavaScript","Python","SQL","React","Node","Excel","AWS"];
+const jobSkillDiv=document.getElementById("jobSkills");
+
+skills.forEach(skill=>{
+const j=document.createElement("span");
+j.className="skill";
+j.innerText=skill;
+j.onclick=()=>{
+selectedJobSkills.includes(skill)?selectedJobSkills=selectedJobSkills.filter(x=>x!==skill):selectedJobSkills.push(skill);
+renderJobSkills();
+};
+jobSkillDiv.appendChild(j);
+});
+
+function renderJobSkills(){
+[...jobSkillDiv.children].forEach(el=>
+ el.classList.toggle("selected",selectedJobSkills.includes(el.innerText))
+);
+}
+
+function renderJobs(){
+const search=document.getElementById("search").value.toLowerCase();
+const container=document.getElementById("jobs");
+container.innerHTML="";
+
+allJobs
+.filter(j=>j.name.toLowerCase().includes(search)||j.description.toLowerCase().includes(search))
+.forEach(job=>{
+const card=document.createElement("div");
+card.className="job-card";
+card.innerHTML=`<b>${job.name}</b><p>${job.description}</p><p>Skills: ${(job.skills||[]).join(", ")}</p><button class="apply-btn" onclick="apply('${job.id}')">Apply</button>`;
+container.appendChild(card);
+});
+}
+
+document.getElementById("search").addEventListener("input",renderJobs);
+
+async function loadJobs(){
+const { data } = await supabase.from("jobs").select("*");
+allJobs = data || [];
+renderJobs();
+}
+
+async function apply(id){
+if(!currentUser){alert("Login required");return;}
+await supabase.from("applications").insert({job_id:id,user_id:currentUser.id});
+alert("Application sent");
+}
+
+async function loadEmployerData(){
+const { data: jobs } = await supabase.from("jobs").select("*").eq("employer_id", currentUser.id);
+const container = document.getElementById("employerJobs");
+container.innerHTML = "";
+
+for(const job of jobs || []){
+const div = document.createElement("div");
+div.className = "job-card";
+
+const { data: apps } = await supabase.from("applications").select("*").eq("job_id", job.id);
+
+let appList = (apps||[]).map(a=>`<li>${a.user_id}</li>`).join("");
+
+ div.innerHTML = `
+ <b>${job.name}</b>
+ <p>${job.description}</p>
+ <p><b>Applications:</b></p>
+ <ul>${appList || "<li>No applications</li>"}</ul>
+ `;
+
+container.appendChild(div);
+}
+}
+
+document.getElementById("postJob").onclick=async()=>{
+const name=document.getElementById("jobName").value;
+const description=document.getElementById("jobDesc").value;
+
+if(!name||!description){alert("Fill out job title and description");return;}
+
+await supabase.from("jobs").insert({
+ name,
+ description,
+ skills:selectedJobSkills,
+ employer_id:currentUser.id
+});
+
+ document.getElementById("jobStatus").innerText="Job posted!";
+ document.getElementById("jobName").value="";
+ document.getElementById("jobDesc").value="";
+ selectedJobSkills=[];
+ renderJobSkills();
+ loadEmployerData();
+};
+
+const signupBtn=document.getElementById("signupBtn");
+const loginBtn=document.getElementById("loginBtn");
+const logoutBtn=document.getElementById("logoutBtn");
+
+signupBtn.onclick=async()=>{
+const email=prompt("Email");
+const password=prompt("Password");
+const isEmployer=confirm("OK = Employer, Cancel = Applicant");
+
+const { data, error } = await supabase.auth.signUp({ email, password });
+if(error){alert(error.message);return;}
+
+const role=isEmployer?"employer":"applicant";
+localStorage.setItem("role",role);
+
+await supabase.from("users").insert({id:data.user.id,role});
+alert("Account created");
+};
+
+loginBtn.onclick=async()=>{
+const email=prompt("Email");
+const password=prompt("Password");
+const { error } = await supabase.auth.signInWithPassword({ email, password });
+if(error) alert(error.message);
+};
+
+logoutBtn.onclick=async()=>{
+localStorage.removeItem("role");
+await supabase.auth.signOut();
+location.reload();
+};
+
+async function checkUser(){
+const { data } = await supabase.auth.getUser();
+currentUser = data.user;
+
+if(!currentUser){
+logoutBtn.classList.add("hidden");
+loginBtn.classList.remove("hidden");
+signupBtn.classList.remove("hidden");
+return;
+}
+
+logoutBtn.classList.remove("hidden");
+loginBtn.classList.add("hidden");
+signupBtn.classList.add("hidden");
+
+let role=localStorage.getItem("role");
+
+if(!role){
+const { data } = await supabase.from("users").select("role").eq("id",currentUser.id).single();
+role=data.role;
+localStorage.setItem("role",role);
+}
+
+if(role==="employer"){
+document.getElementById("jobBoard").classList.add("hidden");
+document.getElementById("employerPanel").classList.remove("hidden");
+loadEmployerData();
+}else{
+document.getElementById("jobBoard").classList.remove("hidden");
+document.getElementById("employerPanel").classList.add("hidden");
+loadJobs();
+}
+}
+
+checkUser();
+
+</script>
+
+</body>
+</html>
