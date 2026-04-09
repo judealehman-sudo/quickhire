@@ -156,23 +156,64 @@ loadEmployerData();
 
 // AUTH
 
-document.getElementById("signupBtn").onclick=async()=>{
-const email=prompt("Email");
-const password=prompt("Password");
-const role=confirm("OK=Employer Cancel=Applicant")?"employer":"applicant";
+// AUTH
 
-const { data } = await supabase.auth.signUp({email,password});
-await supabase.from("users").insert({id:data.user.id,role,skills:[]});
-localStorage.setItem("role",role);
+document.getElementById("signupBtn").onclick = async () => {
+const email = prompt("Email");
+const password = prompt("Password");
+const role = confirm("OK=Employer Cancel=Applicant") ? "employer" : "applicant";
+
+const { data, error } = await supabase.auth.signUp({
+email,
+password,
+options: {
+emailRedirectTo: window.location.href
+}
+});
+
+if (error) {
+alert(error.message);
+return;
+}
+
+// user may be null if email confirmation is on
+if (!data.user) {
+alert("Check your email to confirm signup");
+return;
+}
+
+// create profile
+const { error: insertError } = await supabase
+.from("users")
+.insert({ id: data.user.id, role, skills: [] });
+
+if (insertError) {
+alert(insertError.message);
+return;
+}
+
+alert("Account created! You can now log in.");
 };
 
-document.getElementById("loginBtn").onclick=async()=>{
-const email=prompt("Email");
-const password=prompt("Password");
-await supabase.auth.signInWithPassword({email,password});
+document.getElementById("loginBtn").onclick = async () => {
+const email = prompt("Email");
+const password = prompt("Password");
+
+const { error } = await supabase.auth.signInWithPassword({
+email,
+password
+});
+
+if (error) {
+alert(error.message);
+return;
+}
+
+// force UI refresh
+checkUser();
 };
 
-document.getElementById("logoutBtn").onclick=async()=>{
+document.getElementById("logoutBtn").onclick = async () => {
 await supabase.auth.signOut();
 location.reload();
 };
@@ -207,8 +248,11 @@ loadJobs();
 }
 }
 
-supabase.auth.onAuthStateChange(()=>checkUser());
+supabase.auth.onAuthStateChange((event, session) => {
+currentUser = session?.user || null;
 checkUser();
+});
+
 </script>
 </body>
 </html>
