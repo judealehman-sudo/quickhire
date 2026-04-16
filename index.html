@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>QuickHire</title>
+
+<style>
+body{font-family:Arial;margin:0;background:linear-gradient(135deg,#e8f3ff,#ffffff);}
+header{background:#0b63ce;color:white;padding:16px 40px;display:flex;justify-content:space-between;}
+nav button{margin-left:10px;background:white;color:#0b63ce;border:none;padding:8px 14px;border-radius:6px;}
+
+.container{max-width:1100px;margin:auto;padding:20px;}
+.jobs-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px;}
+.job-card{background:white;padding:18px;border-radius:10px;box-shadow:0 4px 12px rgba(0,0,0,0.1);}
+
+.skill{display:inline-block;padding:6px 10px;border:1px solid #ccc;border-radius:20px;margin:4px;cursor:pointer;}
+.skill.selected{background:#0b63ce;color:white;}
+
+.hidden{display:none;}
+input,textarea{width:100%;padding:8px;margin-top:5px;}
+</style>
+</head>
+
+<body>
+
+<header>
+<h2>QuickHire</h2>
+<nav>
+<button id="signupBtn">Sign Up</button>
+<button id="loginBtn">Log In</button>
+<button id="logoutBtn" class="hidden">Log Out</button>
+</nav>
+</header>
+
+<div id="jobBoard" class="container">
+
+<input id="search" placeholder="Search jobs">
+<div id="jobs" class="jobs-grid"></div>
+
+<h3>Your Profile</h3>
+
+<h4>Select Skills</h4>
+<input id="skillSearch" placeholder="Search skills...">
+<div id="skills"></div>
+
+<h4>Your Saved Skills</h4>
+<div id="mySkills"></div>
+
+<button onclick="saveSkills()">Save Skills</button>
+
+</div>
+
+<script type="module">
+import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
+
+const supabase = createClient(
+"https://cwrschafpaerspklvoqk.supabase.co",
+"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN3cnNjaGFmcGFlcnNwa2x2b3FrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM5NzM2MjIsImV4cCI6MjA4OTU0OTYyMn0.qaUuhw5YSi7aa_rT7dFrck26BnvSaAFSrrBwfclaCPw"
+);
+
+let currentUser=null;
+let selectedSkills=[];
+
+/* ================= SKILLS ================= */
+
+const skills=[
+"HTML","CSS","JavaScript","React","Node.js","Python","SQL","AWS","Docker","Figma",
+"Marketing","Sales","Excel","Finance","Project Management","UI Design","UX Design"
+];
+
+const skillsDiv=document.getElementById("skills");
+const mySkillsDiv=document.getElementById("mySkills");
+const search=document.getElementById("skillSearch");
+
+function renderSkills(filter=""){
+skillsDiv.innerHTML="";
+
+skills
+.filter(s=>s.toLowerCase().includes(filter.toLowerCase()))
+.forEach(skill=>{
+const el=document.createElement("span");
+el.innerText=skill;
+el.className="skill";
+
+if(selectedSkills.includes(skill)) el.classList.add("selected");
+
+el.onclick=()=>{
+selectedSkills.includes(skill)
+? selectedSkills=selectedSkills.filter(x=>x!==skill)
+: selectedSkills.push(skill);
+
+renderSkills(search.value);
+renderMySkills();
+};
+
+skillsDiv.appendChild(el);
+});
+}
+
+search.addEventListener("input",e=>{
+renderSkills(e.target.value);
+});
+
+function renderMySkills(){
+mySkillsDiv.innerHTML="";
+selectedSkills.forEach(skill=>{
+const el=document.createElement("span");
+el.innerText=skill;
+el.className="skill selected";
+mySkillsDiv.appendChild(el);
+});
+}
+
+/* ================= SAVE ================= */
+
+async function saveSkills(){
+const { error } = await supabase
+.from("users")
+.update({ skills: selectedSkills })
+.eq("id", currentUser.id);
+
+if(error){
+alert(error.message);
+return;
+}
+
+alert("Skills saved");
+renderMySkills();
+}
+
+/* ================= AUTH ================= */
+
+document.getElementById("signupBtn").onclick=async()=>{
+const email=prompt("Email");
+const password=prompt("Password");
+
+const { data, error } = await supabase.auth.signUp({email,password});
+if(error) return alert(error.message);
+if(!data.user) return alert("Check email to confirm");
+
+await supabase.from("users").insert({
+id:data.user.id,
+skills:[]
+});
+
+alert("Account created");
+};
+
+document.getElementById("loginBtn").onclick=async()=>{
+const email=prompt("Email");
+const password=prompt("Password");
+
+const { error } = await supabase.auth.signInWithPassword({email,password});
+if(error) return alert(error.message);
+
+checkUser();
+};
+
+document.getElementById("logoutBtn").onclick=async()=>{
+await supabase.auth.signOut();
+location.reload();
+};
+
+/* ================= USER ================= */
+
+async function checkUser(){
+const { data } = await supabase.auth.getUser();
+currentUser=data.user;
+
+if(!currentUser) return;
+
+document.getElementById("loginBtn").classList.add("hidden");
+document.getElementById("signupBtn").classList.add("hidden");
+document.getElementById("logoutBtn").classList.remove("hidden");
+
+const { data: profile } = await supabase
+.from("users")
+.select("skills")
+.eq("id",currentUser.id)
+.single();
+
+selectedSkills = profile?.skills || [];
+
+renderSkills();
+renderMySkills();
+}
+
+supabase.auth.onAuthStateChange(()=>{
+checkUser();
+});
+
+checkUser();
+
+</script>
+</body>
+</html>
