@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>QuickHire</title>
+
+<style>
+body{font-family:Arial;margin:0;background:#f4f7fb;}
+header{background:#0b63ce;color:white;padding:15px;display:flex;justify-content:space-between;align-items:center;}
+.container{padding:20px;}
+.skill{padding:6px 10px;border:1px solid #ccc;border-radius:20px;margin:4px;display:inline-block;cursor:pointer;}
+.selected{background:#0b63ce;color:white;}
+.hidden{display:none;}
+input, button{margin:5px 0;}
+.card{background:white;padding:15px;border-radius:10px;margin-top:15px;}
+</style>
+</head>
+
+<body>
+
+<header>
+<h2>QuickHire</h2>
+<div>
+<button id="signupBtn">Sign Up</button>
+<button id="loginBtn">Login</button>
+<button id="logoutBtn" class="hidden">Logout</button>
+</div>
+</header>
+
+<div class="container">
+
+<div class="card">
+<h3>Your Skills</h3>
+<input id="skillSearch" placeholder="Search skills">
+<div id="skills"></div>
+
+<h4>Saved Skills</h4>
+<div id="mySkills"></div>
+
+<button id="saveBtn">Save Skills</button>
+</div>
+
+<div class="card">
+<h3>Resume Upload</h3>
+<input type="file" id="resumeInput" accept="application/pdf" />
+<button id="uploadResumeBtn">Upload Resume</button>
+<p id="resumeStatus"></p>
+</div>
+
+</div>
+
+<script type="module">
+import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
+
+const supabase = createClient(
+  "https://cwrschafpaerspklvoqk.supabase.co",
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN3cnNjaGFmcGFlcnNwa2x2b3FrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM5NzM2MjIsImV4cCI6MjA4OTU0OTYyMn0.qaUuhw5YSi7aa_rT7dFrck26BnvSaAFSrrBwfclaCPw"
+);
+
+let user = null;
+let selectedSkills = [];
+
+const skills = ["HTML","CSS","JavaScript","React","Node","Python","SQL","AWS","Docker","Figma"];
+
+const skillsDiv = document.getElementById("skills");
+const mySkillsDiv = document.getElementById("mySkills");
+const resumeStatus = document.getElementById("resumeStatus");
+
+/* ================= SKILLS ================= */
+
+function renderSkills(filter=""){
+  skillsDiv.innerHTML = "";
+
+  skills
+    .filter(s => s.toLowerCase().includes(filter.toLowerCase()))
+    .forEach(skill => {
+      const el = document.createElement("span");
+      el.innerText = skill;
+      el.className = "skill";
+
+      if(selectedSkills.includes(skill)) el.classList.add("selected");
+
+      el.onclick = () => {
+        if(selectedSkills.includes(skill)){
+          selectedSkills = selectedSkills.filter(x => x !== skill);
+        } else {
+          selectedSkills.push(skill);
+        }
+        renderSkills(document.getElementById("skillSearch").value);
+        renderMySkills();
+      };
+
+      skillsDiv.appendChild(el);
+    });
+}
+
+function renderMySkills(){
+  mySkillsDiv.innerHTML = "";
+  selectedSkills.forEach(s=>{
+    const el=document.createElement("span");
+    el.innerText=s;
+    el.className="skill selected";
+    mySkillsDiv.appendChild(el);
+  });
+}
+
+/* ================= SAVE SKILLS ================= */
+
+document.getElementById("saveBtn").onclick = async () => {
+  if(!user) return alert("Login first");
+
+  const { error } = await supabase
+    .from("users")
+    .update({ skills: selectedSkills })
+    .eq("id", user.id);
+
+  if(error){
+    console.error(error);
+    return alert(error.message);
+  }
+
+  alert("Skills saved!");
+};
+
+/* ================= RESUME UPLOAD ================= */
+
+document.getElementById("uploadResumeBtn").onclick = async () => {
+  if(!user) return alert("Login first");
+
+  const file = document.getElementById("resumeInput").files[0];
+  if(!file) return alert("Select a PDF file");
+
+  const filePath = `${user.id}/${Date.now()}-${file.name}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from("resumes")
+    .upload(filePath, file);
+
+  if(uploadError){
+    console.error(uploadError);
+    return alert(uploadError.message);
+  }
+
+  const { data } = supabase.storage
+    .from("resumes")
+    .getPublicUrl(filePath);
+
+  const resumeUrl = data.publicUrl;
+
+  const { error: dbError } = await supabase
+    .from("users")
+    .update({ resume_url: resumeUrl })
+    .eq("id", user.id);
+
+  if(dbError){
+    console.error(dbError);
+    return alert(dbError.message);
+  }
+
+  resumeStatus.innerHTML = `Resume: <a href="${resumeUrl}" target="_blank">View</a>`;
+};
+
+/* ================= AUTH ================= */
+
+signupBtn.onclick = async () => {
+  const email = prompt("Email");
+  const password = prompt("Password");
+
+  const { error } = await supabase.auth.signUp({ email, password });
+
+  if(error){
+    console.error(error);
+    return alert(error.message);
+  }
+
+  alert("Check email if confirmation is required.");
+};
+
+loginBtn.onclick = async () => {
+  const email = prompt("Email");
+  const password = prompt("Password");
+
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+
+  if(error){
+    console.error("LOGIN ERROR:", error);
+    return alert(error.message);
+  }
+
+  console.log("LOGIN SUCCESS:", data);
+
+  setTimeout(checkUser, 300);
+};
+
+logoutBtn.onclick = async () => {
+  await supabase.auth.signOut();
+  location.reload();
+};
+
+/* ================= USER LOAD (FIXED FRONTEND STATE HANDLING) ================= */
+
+async function checkUser() {
+  const { data, error } = await supabase.auth.getUser();
+
+  if(error){
+    console.error("Auth error:", error);
+    return;
+  }
+
+  const authUser = data.user;
+
+  if(!authUser){
+    console.log("Not logged in");
+    user = null;
+
+    signupBtn.classList.remove("hidden");
+    loginBtn.classList.remove("hidden");
+    logoutBtn.classList.add("hidden");
+
+    return;
+  }
+
+  user = authUser;
+
+  console.log("LOGGED IN:", user.id);
+
+  signupBtn.classList.add("hidden");
+  loginBtn.classList.add("hidden");
+  logoutBtn.classList.remove("hidden");
+
+  let { data: profile, error: profileError } = await supabase
+    .from("users")
+    .select("*")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  if(profileError){
+    console.error(profileError);
+    return;
+  }
+
+  if(!profile){
+    const { data: inserted, error: insertError } = await supabase
+      .from("users")
+      .insert({ id: user.id, skills: [], resume_url: null })
+      .select()
+      .single();
+
+    if(insertError){
+      console.error(insertError);
+      return;
+    }
+
+    profile = inserted;
+  }
+
+  selectedSkills = profile.skills || [];
+
+  if(profile.resume_url){
+    resumeStatus.innerHTML = `Resume: <a href="${profile.resume_url}" target="_blank">View</a>`;
+  }
+
+  renderSkills();
+  renderMySkills();
+}
+
+/* ================= EVENTS ================= */
+
+document.getElementById("skillSearch").addEventListener("input", e=>{
+  renderSkills(e.target.value);
+});
+
+supabase.auth.onAuthStateChange((event) => {
+  console.log("AUTH EVENT:", event);
+  checkUser();
+});
+
+window.addEventListener("load", async () => {
+  await supabase.auth.getSession();
+  checkUser();
+});
+
+renderSkills();
+checkUser();
+
+</script>
+
+</body>
+</html>
