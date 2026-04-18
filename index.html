@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>QuickHire</title>
+
+<style>
+body{font-family:Arial;margin:0;background:#f4f7fb;}
+header{background:#0b63ce;color:white;padding:15px;display:flex;justify-content:space-between;align-items:center;}
+.container{padding:20px;}
+.card{background:white;padding:15px;border-radius:10px;margin-top:15px;}
+.skill{padding:6px 10px;border:1px solid #ccc;border-radius:20px;margin:4px;display:inline-block;cursor:pointer;}
+.selected{background:#0b63ce;color:white;}
+.hidden{display:none;}
+.job{border:1px solid #ddd;padding:10px;border-radius:8px;margin:10px 0;}
+button{cursor:pointer;}
+</style>
+</head>
+
+<body>
+
+<header>
+<h2>QuickHire</h2>
+<div>
+<button id="signupBtn">Sign Up</button>
+<button id="loginBtn">Login</button>
+<button id="logoutBtn" class="hidden">Logout</button>
+</div>
+</header>
+
+<div class="container">
+
+<div class="card">
+<h3>Profile Skills</h3>
+<input id="skillSearch" placeholder="Search skills">
+<div id="skills"></div>
+<h4>Saved Skills</h4>
+<div id="mySkills"></div>
+<button id="saveBtn">Save Skills</button>
+
+<br><br>
+<h4>Resume</h4>
+<input type="file" id="resumeInput" accept="application/pdf">
+<button id="uploadResumeBtn">Upload Resume</button>
+<p id="resumeStatus"></p>
+</div>
+
+<div class="card">
+<h3>Jobs</h3>
+<div id="jobs"></div>
+</div>
+
+<div class="card hidden" id="employerCard">
+<h3>Employer Dashboard</h3>
+<input id="jobTitle" placeholder="Job title"><br>
+<textarea id="jobDesc" placeholder="Job description"></textarea><br>
+<input id="jobSkills" placeholder="Skills (comma separated)"><br>
+<button id="postJobBtn">Post Job</button>
+
+<h4>Your Jobs</h4>
+<div id="myJobs"></div>
+
+<h4>Applications</h4>
+<div id="applications"></div>
+</div>
+
+</div>
+
+<script type="module">
+import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
+
+const supabase = createClient(
+  "https://cwrschafpaerspklvoqk.supabase.co",
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN3cnNjaGFmcGFlcnNwa2x2b3FrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM5NzM2MjIsImV4cCI6MjA4OTU0OTYyMn0.qaUuhw5YSi7aa_rT7dFrck26BnvSaAFSrrBwfclaCPw"
+);
+
+let user=null;
+let profile=null;
+let selectedSkills=[];
+
+const skills=["HTML","CSS","JavaScript","React","Node","Python","SQL","AWS","Docker","Figma"];
+
+const skillsDiv=document.getElementById("skills");
+const mySkillsDiv=document.getElementById("mySkills");
+const jobsDiv=document.getElementById("jobs");
+const myJobsDiv=document.getElementById("myJobs");
+const appDiv=document.getElementById("applications");
+const resumeStatus=document.getElementById("resumeStatus");
+const signupBtn=document.getElementById("signupBtn");
+const loginBtn=document.getElementById("loginBtn");
+const logoutBtn=document.getElementById("logoutBtn");
+const saveBtn=document.getElementById("saveBtn");
+const uploadResumeBtn=document.getElementById("uploadResumeBtn");
+const resumeInput=document.getElementById("resumeInput");
+const employerCard=document.getElementById("employerCard");
+const postJobBtn=document.getElementById("postJobBtn");
+const jobTitle=document.getElementById("jobTitle");
+const jobDesc=document.getElementById("jobDesc");
+const jobSkills=document.getElementById("jobSkills");
+const skillSearch=document.getElementById("skillSearch");
+let authReady=false;
+
+function updateAuthUI(){
+  const isLoggedIn=!!user;
+
+  signupBtn.classList.toggle("hidden", isLoggedIn);
+  loginBtn.classList.toggle("hidden", isLoggedIn);
+  logoutBtn.classList.toggle("hidden", !isLoggedIn);
+  employerCard.classList.toggle("hidden", profile?.role!=="employer");
+}
+
+function escapeHtml(value=""){
+  return String(value).replace(/[&<>"']/g, char => ({
+    "&":"&amp;",
+    "<":"&lt;",
+    ">":"&gt;",
+    '"':"&quot;",
+    "'":"&#39;"
+  }[char]));
+}
+
+function normalizeSkills(value){
+  if(Array.isArray(value)) return value.filter(Boolean);
+  if(typeof value==="string"){
+    return value.split(",").map(s=>s.trim()).filter(Boolean);
+  }
+  return [];
+}
+
+async function ensureProfile(authUser, preferredRole=null){
+  if(!authUser) return null;
+
+  const metadataRole=authUser.user_metadata?.role;
+  const fallbackRole=preferredRole || metadataRole || "applicant";
+
+  const {data:existing,error:fetchError}=await supabase
+    .from("users")
+    .select("*")
+    .eq("id",authUser.id)
+    .maybeSingle();
+
+  if(fetchError) throw fetchError;
+
+  const payload={
+    id:authUser.id,
+    role:preferredRole || existing?.role || fallbackRole,
+    skills:normalizeSkills(existing?.skills),
+    resume_url:existing?.resume_url || null
+  };
+
+  const {data:upserted,error:upsertError}=await supabase
+    .from("users")
+    .upsert(payload)
+    .select()
+    .single();
+
+  if(upsertError) throw upsertError;
+  return upserted;
+}
+
+async function syncAuthState(session=null, preferredRole=null){
+  user=session?.user || null;
+  updateAuthUI();
+
+  if(!user){
+    profile=null;
+    selectedSkills=[];
+    resumeStatus.textContent="";
+    renderSkills(skillSearch.value);
+    renderMySkills();
+    myJobsDiv.innerHTML="";
+    appDiv.innerHTML="";
+    await loadJobs();
+    return;
+  }
+
+  profile={
+    id:user.id,
+    role:preferredRole || user.user_metadata?.role || "applicant",
+    skills:[],
+    resume_url:null
+  };
+  selectedSkills=[];
+  resumeStatus.textContent="";
+  updateAuthUI();
+  renderSkills(skillSearch.value);
+  renderMySkills();
+  await loadJobs();
+
+  try{
+    const dbProfile=await ensureProfile(user, preferredRole);
+    profile={
+      ...profile,
+      ...dbProfile,
+      skills:normalizeSkills(dbProfile?.skills),
+      resume_url:dbProfile?.resume_url || null
+    };
+    selectedSkills=[...profile.skills];
+    resumeStatus.innerHTML=profile.resume_url
+      ? `<a href="${profile.resume_url}" target="_blank">View Resume</a>`
+      : "";
+  }catch(error){
+    console.error("Profile sync failed:", error);
+    alert(`Logged in, but your database blocked profile loading: ${error.message}`);
+  }
+
+  updateAuthUI();
+  renderSkills(skillSearch.value);
+  renderMySkills();
+  await loadJobs();
+
+  if(profile?.role==="employer"){
+    await loadMyJobs();
+    await loadApplications();
+  }else{
+    myJobsDiv.innerHTML="";
+    appDiv.innerHTML="";
+  }
+}
+
+/* ================= SKILLS ================= */
+function renderSkills(filter=""){
+  skillsDiv.innerHTML="";
+  skills.filter(s=>s.toLowerCase().includes(filter.toLowerCase())).forEach(s=>{
+    const el=document.createElement("span");
+    el.className="skill";
+    if(selectedSkills.includes(s)) el.classList.add("selected");
+    el.innerText=s;
+    el.onclick=()=>{
+      selectedSkills = selectedSkills.includes(s)
+        ? selectedSkills.filter(x=>x!==s)
+        : [...selectedSkills,s];
+      renderSkills(filter);
+      renderMySkills();
+    };
+    skillsDiv.appendChild(el);
+  });
+}
+
+function renderMySkills(){
+  mySkillsDiv.innerHTML="";
+  selectedSkills.forEach(s=>{
+    const el=document.createElement("span");
+    el.className="skill selected";
+    el.innerText=s;
+    mySkillsDiv.appendChild(el);
+  });
+}
+
+/* ================= AUTH FIX ================= */
+
+signupBtn.onclick=async()=>{
+  const email=prompt("Email");
+  const password=prompt("Password");
+  if(!email || !password)return;
+
+  const roleChoice=confirm("OK = Employer, Cancel = Applicant");
+  const role=roleChoice?"employer":"applicant";
+
+  const {data,error}=await supabase.auth.signUp({
+    email,
+    password,
+    options:{ data:{ role } }
+  });
+  if(error)return alert(error.message);
+  await syncAuthState(data.session, role);
+  alert(data.session ? "Account created and logged in." : "Account created. Check your email before logging in if confirmation is required.");
+};
+
+loginBtn.onclick=async()=>{
+  const email=prompt("Email");
+  const password=prompt("Password");
+  if(!email || !password)return;
+
+  const {data,error}=await supabase.auth.signInWithPassword({email,password});
+  if(error)return alert(error.message);
+  await syncAuthState(data.session);
+};
+
+logoutBtn.onclick=async()=>{
+  const {error}=await supabase.auth.signOut();
+  if(error)return alert(error.message);
+  user=null;
+  profile=null;
+  selectedSkills=[];
+  resumeStatus.textContent="";
+  updateAuthUI();
+  renderSkills(skillSearch.value);
+  renderMySkills();
+  await loadJobs();
+  myJobsDiv.innerHTML="";
+  appDiv.innerHTML="";
+};
+
+/* ================= USER FIXED ================= */
+
+async function checkUser(){
+  const {data,error}=await supabase.auth.getSession();
+  if(error){
+    alert(error.message);
+    return;
+  }
+  await syncAuthState(data.session);
+}
+
+/* ================= PROFILE ================= */
+
+saveBtn.onclick=async()=>{
+  if(!user)return alert("Please log in first.");
+  const {error}=await supabase.from("users").update({skills:selectedSkills}).eq("id",user.id);
+  if(error)return alert(error.message);
+  if(profile) profile.skills=[...selectedSkills];
+  alert("saved");
+};
+
+uploadResumeBtn.onclick=async()=>{
+  if(!user)return alert("Please log in first.");
+  const file=resumeInput.files[0];
+  if(!file)return alert("Please choose a PDF first.");
+  const path=`${user.id}/${Date.now()}-${file.name}`;
+
+  const {error:uploadError}=await supabase.storage.from("resumes").upload(path,file);
+  if(uploadError)return alert(uploadError.message);
+
+  const {data}=supabase.storage.from("resumes").getPublicUrl(path);
+
+  const {error:updateError}=await supabase.from("users").update({resume_url:data.publicUrl}).eq("id",user.id);
+  if(updateError)return alert(updateError.message);
+
+  if(profile) profile.resume_url=data.publicUrl;
+  resumeStatus.innerHTML=`<a href="${data.publicUrl}" target="_blank">View Resume</a>`;
+};
+
+/* ================= JOBS ================= */
+
+async function loadJobs(){
+  const {data,error}=await supabase.from("jobs").select("*").order("id",{ascending:false});
+  if(error){
+    jobsDiv.innerHTML=`<p>${error.message}</p>`;
+    return;
+  }
+  jobsDiv.innerHTML="";
+
+  (data||[]).forEach(job=>{
+    const div=document.createElement("div");
+    div.className="job";
+    const skillsList=normalizeSkills(job.skills);
+    div.innerHTML=`
+      <b>${escapeHtml(job.title || "Untitled Job")}</b>
+      <p>${escapeHtml(job.description || "")}</p>
+      <p>${skillsList.length ? `Skills: ${escapeHtml(skillsList.join(", "))}` : ""}</p>
+    `;
+
+    const btn=document.createElement("button");
+    btn.innerText="Apply";
+    btn.disabled=!user || profile?.role==="employer";
+    btn.onclick=async()=>{
+      if(!user)return alert("Please log in first.");
+      if(profile?.role==="employer")return alert("Employer accounts cannot apply to jobs.");
+      if(!profile?.resume_url)return alert("Upload your resume before applying.");
+
+      const summaryText=`Applicant: ${user.email || user.id}
+Skills: ${normalizeSkills(profile.skills).join(", ") || "None listed"}
+Resume: ${profile.resume_url}`;
+
+      const {error:applyError}=await supabase
+        .from("applications")
+        .upsert({
+          job_id:job.id,
+          user_id:user.id,
+          cover_letter:summaryText
+        });
+      if(applyError)return alert(applyError.message);
+      alert("Applied!");
+    };
+
+    div.appendChild(btn);
+    jobsDiv.appendChild(div);
+  });
+}
+
+/* ================= EMPLOYER ================= */
+
+postJobBtn.onclick=async()=>{
+  if(!user || profile?.role!=="employer")return alert("Only employers can post jobs.");
+  const title=jobTitle.value.trim();
+  const desc=jobDesc.value.trim();
+  const skills=jobSkills.value.split(",").map(s=>s.trim()).filter(Boolean);
+  if(!title || !desc)return alert("Enter a job title and description.");
+
+  const {error}=await supabase.from("jobs").insert({
+    title,
+    description:desc,
+    skills,
+    employer_id:user.id
+  });
+  if(error)return alert(error.message);
+
+  jobTitle.value="";
+  jobDesc.value="";
+  jobSkills.value="";
+  await loadJobs();
+  await loadMyJobs();
+};
+
+async function loadMyJobs(){
+  if(!user)return;
+  const {data,error}=await supabase.from("jobs").select("*").eq("employer_id",user.id).order("id",{ascending:false});
+  if(error){
+    myJobsDiv.innerHTML=`<p>${error.message}</p>`;
+    return;
+  }
+  myJobsDiv.innerHTML="";
+  (data||[]).forEach(j=>{
+    const d=document.createElement("div");
+    d.className="job";
+    d.innerHTML=`<b>${escapeHtml(j.title || "Untitled Job")}</b><p>${escapeHtml(j.description || "")}</p>`;
+    myJobsDiv.appendChild(d);
+  });
+}
+
+async function loadApplications(){
+  if(!user)return;
+  const {data:jobs,error:jobsError}=await supabase
+    .from("jobs")
+    .select("id,title")
+    .eq("employer_id",user.id);
+
+  if(jobsError){
+    appDiv.innerHTML=`<p>${jobsError.message}</p>`;
+    return;
+  }
+
+  if(!jobs?.length){
+    appDiv.innerHTML="<p>No applications yet.</p>";
+    return;
+  }
+
+  const jobMap=new Map(jobs.map(job=>[job.id,job]));
+  const jobIds=jobs.map(job=>job.id);
+
+  const {data:applications,error:applicationsError}=await supabase
+    .from("applications")
+    .select("*")
+    .in("job_id",jobIds)
+    .order("id",{ascending:false});
+
+  if(applicationsError){
+    appDiv.innerHTML=`<p>${applicationsError.message}</p>`;
+    return;
+  }
+
+  const applicantIds=[...new Set((applications||[]).map(a=>a.user_id).filter(Boolean))];
+  let profileMap=new Map();
+
+  if(applicantIds.length){
+    const {data:userProfiles,error:userProfilesError}=await supabase
+      .from("users")
+      .select("id,skills,resume_url")
+      .in("id",applicantIds);
+
+    if(userProfilesError){
+      appDiv.innerHTML=`<p>${userProfilesError.message}</p>`;
+      return;
+    }
+
+    profileMap=new Map((userProfiles||[]).map(p=>[p.id,p]));
+  }
+
+  appDiv.innerHTML="";
+  if(!(applications||[]).length){
+    appDiv.innerHTML="<p>No applications yet.</p>";
+    return;
+  }
+
+  (applications||[]).forEach(a=>{
+    const applicant=profileMap.get(a.user_id) || {};
+    const applicantSkills=normalizeSkills(applicant.skills);
+    const job=jobMap.get(a.job_id);
+    const d=document.createElement("div");
+    d.className="job";
+    d.innerHTML=`
+      <b>${escapeHtml(job?.title || "Job")}</b><br>
+      Applicant: ${escapeHtml(a.user_id || "Unknown")}<br>
+      Skills: ${escapeHtml(applicantSkills.join(", ") || "None listed")}<br>
+      Resume: ${applicant.resume_url ? `<a href="${applicant.resume_url}" target="_blank">Open Resume</a>` : "No resume uploaded"}<br>
+      <small>${escapeHtml(a.cover_letter || "")}</small>
+    `;
+    appDiv.appendChild(d);
+  });
+}
+
+/* ================= INIT ================= */
+
+skillSearch.oninput=e=>renderSkills(e.target.value);
+supabase.auth.onAuthStateChange(async(_event,session)=>{
+  if(!authReady) return;
+  await syncAuthState(session);
+});
+await checkUser();
+authReady=true;
+renderSkills();
+updateAuthUI();
+
+</script>
+
+</body>
+</html>
