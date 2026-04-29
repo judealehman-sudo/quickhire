@@ -398,16 +398,11 @@ async function loadJobs(){
       if(profile?.role==="employer")return alert("Employer accounts cannot apply to jobs.");
       if(!profile?.resume_url)return alert("Upload your resume before applying.");
 
-      const summaryText=`Applicant: ${user.email || user.id}
-Skills: ${normalizeSkills(profile.skills).join(", ") || "None listed"}
-Resume: ${profile.resume_url}`;
-
       const {error:applyError}=await supabase
         .from("applications")
         .upsert({
           job_id:job.id,
-          user_id:user.id,
-          cover_letter:summaryText
+          user_id:user.id
         });
       if(applyError)return alert(applyError.message);
       alert("Applied!");
@@ -521,8 +516,7 @@ async function loadApplications(){
       <b>${escapeHtml(job?.title || "Job")}</b><br>
       Applicant: ${escapeHtml(a.user_id || "Unknown")}<br>
       Skills: ${escapeHtml(applicantSkills.join(", ") || "None listed")}<br>
-      Resume: ${applicant.resume_url ? `<a href="${applicant.resume_url}" target="_blank">Open Resume</a>` : "No resume uploaded"}<br>
-      <small>${escapeHtml(a.cover_letter || "")}</small>
+      Resume: ${applicant.resume_url ? `<a href="${applicant.resume_url}" target="_blank">Open Resume</a>` : "No resume uploaded"}
     `;
     appDiv.appendChild(d);
   });
